@@ -1,0 +1,32 @@
+﻿﻿Title:,Table 5 - HE academic staff by disability and academic employment function,,,,,,,,
+Subtitle:,Academic years 2014/15 to 2024/25,,,,,,,,
+Reference ID:,DT025 Table 5,,,,,,,,
+Data source:,HESA,,,,,,,,
+Data source link:,https://www.hesa.ac.uk/data-and-analysis/staff/table-5,,,,,,,,
+Data file canonical link:,https://www.hesa.ac.uk/data-and-analysis/staff/table-5.csv,,,,,,,,
+Licence:,Creative Commons Attribution 4.0 International Licence,,,,,,,,
+Date:,2026,,,,,,,,
+Filters:,Mode of employment,All ,,,,,,,
+,Nationality marker,All ,,,,,,,
+,Sex,All ,,,,,,,
+,Terms of employment,All ,,,,,,,
+,Country of HE provider,All ,,,,,,,
+,Academic year,2024/25 ,,,,,,,
+,,,,,,,,,
+,,,,,,,,,
+Disability,Teaching only,Research only,Both teaching and research,Neither teaching nor research,Total,,Included in count of neurodivergent staff we reported in Sayen et al. (2026) introduction,,
+"Learning difference such as dyslexia, dyspraxia or AD(H)D","2,095",970,"1,675",40,"4,780",,TRUE,,
+Social/communication conditions such as a speech and language impairment or an autistic spectrum condition,295,200,250,5,750,,TRUE,,Total neurodivergent staff:
+"Development condition that you have had since childhood which affects motor, cognitive, social and emotional skills, and speech and language",25,15,30,0,70,,TRUE,,"5,600"
+"Long-term illness or health condition such as cancer, HIV, diabetes, chronic heart disease, or epilepsy","1,400",690,"1,770",30,"3,890",,FALSE,,
+"Mental health condition, challenge or disorder, such as depression, schizophrenia or anxiety","1,075",640,885,20,"2,620",,FALSE,,% of neurodivergent staff ot of Total academi staff:
+"Physical impairment (a condition that substantially limits one or more basic physical activities such as walking, climbing stairs, lifting or carrying)",445,140,585,10,"1,185",,FALSE,,2.288002288
+D/deaf or have a hearing impairment,265,100,385,5,760,,FALSE,,
+Blind or have a visual impairment uncorrected by glasses,120,55,155,0,335,,FALSE,,% rounded to 1 decimal place:
+"An impairment, health condition or learning difference not listed above",810,375,"1,000",25,"2,215",,FALSE,,2.3
+"Two or more disabilities, impairments or conditions",755,340,735,10,"1,840",,FALSE,,
+Total staff with a disability,"7,290","3,530","7,465",150,"18,440",,NA,,
+"No known impairment, health condition or learning difference","65,940","39,940","88,130","1,390","195,400",,NA,,
+Total of known disability status,"73,230","43,470","95,595","1,540","213,840",,NA,,
+Unknown,"11,940","8,750","10,030",190,"30,915",,NA,,
+Total academic staff,"85,170","52,220","105,630","1,730","244,755",,NA,,

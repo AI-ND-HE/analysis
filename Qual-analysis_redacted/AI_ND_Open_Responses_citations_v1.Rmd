@@ -1,0 +1,151 @@
+---
+title: "AI_ND_Open_Responses"
+author: 'Authored by Jade Burke on 27/06/2025. Edited by Sara Eftekhari on 20/08/2026'
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+library(grateful) # for citations!
+library("tidyverse")
+
+# Load in dat_open
+dat_open <- read_csv("dat_open.csv")
+```
+
+```{r}
+#Creating a dataset to do qual analysis with
+
+dat_filtered <- dat_open %>%
+  filter(Question != "Progress") %>%
+  filter(Question != "Finished") %>%
+  filter(Question != "Status") %>%
+  filter(Question != "DistributionChannel") %>%
+  filter(Question != "UserLanguage") %>%
+  filter(Question != "consent_form") %>%
+  filter(Question != "RecordedDate") %>%
+  filter(Question != "RecordedDate") %>%
+  filter(Question != "followup_interested") %>%
+  filter(!is.na(Answer), Answer != "") %>%
+  filter(Question != "academic_frequency") %>%
+  filter(Question != "nonacademic_frequenc") %>%
+  select(-Recruitment) %>% #dropping Recruitment column
+  mutate(Pseudonym = factor(ResponseId)) %>%              # convert to factor
+  mutate(Pseudonym = paste0("Participant_", as.numeric(Pseudonym))) %>% 
+  select(Pseudonym, everything()) #giving each participant a number as a pseudonym
+
+#Checking for amount of unique questions
+unique_questions <- dat_filtered %>%
+  distinct(Question)
+
+#Duplicate question for Prolific IDs spotted
+duplicate_filtered <- dat_filtered %>%
+  filter(Question %in% c("PROLIFIC_PID", "Q29"))
+
+#Checking for differences in Prolific ID rows
+dat_flagged <- duplicate_filtered %>%
+  group_by(Answer) %>%
+  mutate(is_unique = n() == 1) %>%
+  ungroup()
+
+#Dropping duplicate Q29 row from main dataset
+dat_filtered_2 <- dat_filtered %>%
+  filter(Question != "Q29")
+
+#Checking for amount of unique questions in new dataset
+unique_questions <- dat_filtered_2 %>%
+  distinct(Question)
+```
+
+```{r}
+#Creating a csv of demographics answers
+demos <- dat_filtered_2 %>%
+  filter(Question %in% c("StartDate", "EndDate", "Duration (in seconds)", "age", "gender", "position", "neurodivergent", "neurodivergent_1_TEXT", "ethnicity", "ethnicity_22_TEXT", "Response_Sharing_Cho", "ND screener", "Screener - Country", "Age Screener", "PROLIFIC_PID", "ethnicity_11_TEXT"))
+
+write.csv(demos, "demos.csv", row.names = FALSE)
+```
+
+```{r}
+## Creating csv files of open answers
+# Filter and select relevant columns for creating csv files
+library(dplyr)
+library(purrr)
+library(readr)
+
+dat_csvs <- dat_filtered_2 %>%
+  select(-ResponseId) %>%
+  select(Question, Pseudonym, Answer)
+
+# List of questions to export
+questions <- c("other_tools", "name_faves", "what_tasks", "struggles", "benefits_academic", "useful", "barriers",                "tasks_activities", "ND_AI_use", "other_uses_guidance", "anything_else")
+
+# Write each question subset to its own CSV
+walk(questions, function(q) {
+  dat_csvs %>%
+    filter(Question == q) %>%
+    write_csv(paste0(q, ".csv"))
+})
+```
+
+```{r}
+##Creating a workbook of csv files
+#install.packages("openxlsx")
+library(openxlsx)
+
+# Your folder with the CSV files
+csv_folder <- "Open_Answer_Files"
+
+# Specify only the CSV files you want to include
+selected_files <- c(
+  "name_faves.csv",
+  "barriers.csv",
+  "anything_else.csv",
+  "benefits_academic.csv",
+  "ND_AI_use.csv",
+  "other_tools.csv",
+  "other_uses_guidance.csv",
+  "struggles.csv",
+  "tasks_activities.csv",
+  "useful.csv",
+  "what_tasks.csv",
+  "demos.csv")
+
+# Create full paths to those CSVs
+csv_paths <- file.path(csv_folder, selected_files)
+
+# Create a new Excel workbook
+wb <- createWorkbook()
+
+# Loop through selected CSVs and add each as a worksheet
+for (file in csv_paths) {
+  sheet_name <- tools::file_path_sans_ext(basename(file))
+  data <- read.csv(file)
+
+  addWorksheet(wb, sheet_name)
+
+  # Write your extra row (as a message, label, or just empty)
+  writeData(wb, sheet = sheet_name, x = paste("Data from", sheet_name), startRow = 1, colNames = FALSE)
+
+  # Then write the actual data below it (starting at row 2)
+  writeData(wb, sheet = sheet_name, x = data, startRow = 2)
+}
+
+saveWorkbook(wb, "selected_questions.xlsx", overwrite = TRUE)
+
+```
+
+
+# Generating citations to include in changelog:
+```{r}
+# To get the citations for this R Markdown version:
+docx_path <- grateful::cite_packages(
+  output = "file",
+  out.format = "docx", # will save a grateful-report.docx and grateful-refs.bib file. Use the grateful-report.docx contents to update the changelog.
+  out.dir = ".",
+  pkgs = "Session",
+  omit = NULL,
+  skip.missing = FALSE,
+  cite.tidyverse  = TRUE,
+)
+
+```

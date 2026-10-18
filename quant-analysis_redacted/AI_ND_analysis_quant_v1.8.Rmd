@@ -1,0 +1,1408 @@
+---
+title: "AI_ND_analysis_quant"
+author: 'Sara Eftekhari'
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    css: styles.css # Sets the body text to a sans-serif Atkinson Hyperlegible font, and the code blocks and preformatted text to a monospace Atkinson Hyperlegible font.
+---
+
+# Reference for Atkinson Hyperlegible Mono Regular font:
+Scott, E., Eiswerth, M., Boman, L., & Petrosky, T. (2020). Atkinson Hyperlegible Font (Version 1.02) [Computer software]. Braille Institute of America Inc. https://www.brailleinstitute.org/freefont/
+
+# Dependencies:
+```{r}
+library(showtext) # for loading in the Atkinson Hyperlegible Mono Regular font
+library(qualtRics)
+library(grateful) # for citations!
+library(tidytext) # for ordering stuff within facets individually
+library(tidyverse)
+
+font_add(family = "AtkinsonMono", 
+         regular = "C:/Users/sarae/AppData/Local/Microsoft/Windows/Fonts/AtkinsonHyperlegibleMono-Regular.ttf") # The full path must be specified for R to successfully locate the font. You can find a copy of AtkinsonHyperlegibleMono-Regular.ttf in the font folder in the analysis_quant folder. I haven't tried specifying the path that way instead of going the system fonts route.
+
+showtext_auto() # Necessary, otherwise R may not recognise all system fonts.
+
+# Global settings for all plots set to: Atkinson Hyperlegible Mono Regular font + larger font size + theme_classic(): 
+theme_set(
+  theme_classic(base_family = "AtkinsonMono", base_size = 20) +
+    theme(
+      plot.title = element_text(family = "AtkinsonMono", size = 20),
+      plot.subtitle = element_text(family = "AtkinsonMono", size = 20),
+      plot.caption = element_text(family = "AtkinsonMono", size = 20),
+      axis.title = element_text(family = "AtkinsonMono", size = 20),
+      axis.text = element_text(family = "AtkinsonMono", size = 20),
+      legend.title = element_text(family = "AtkinsonMono", size = 20),
+      legend.text = element_text(family = "AtkinsonMono", size = 20),
+      strip.text = element_text(family = "AtkinsonMono", size = 20)
+    )
+)
+
+```
+
+
+# Loading in data
+```{r}
+# Traditional data csv
+dat_trad <- read_survey(file_name = "data/AIandNDSurvey_June_18_2025_02.49.csv")
+
+# Prolific data csv
+dat_prol <- read_survey(
+  file_name = "data/AIandNDSurvey_Prolific_June_18_2025_02.49.csv",
+  legacy = TRUE #without this, there's an error loading in the file
+  )
+  
+```
+
+
+## Extracting the "Prefer not to say" answers for "Are you neurodivergent?":
+
+```{r}
+# For the non-Prolific answers (which we're interested in removing):
+dat_trad_prefNOT <- dat_trad %>%
+  filter(neurodivergent == "Prefer not to say") #it looks like only the test/preview answers say "Prefer not to say"
+
+dat_trad_prefNOT
+
+excl_prefNOT_n <- 0 # set this manually
+
+
+# For the prolific answers (which are already screened so even if participants say "Prefer not to say" we know they've already answered yes to being neurodivergent in the screener):
+dat_prol_prefNOT <- dat_prol %>%
+  filter(neurodivergent == "Prefer not to say") # 4 actual responses (NOT test/preview) say "Prefer not to say"
+
+dat_prol_prefNOT
+
+```
+
+
+
+# Cleaning the data for:
+- including only those who consented
+- including only those who completed the study
+- excluding preview/test responses
+- removing ALL responses if duplicate IDs were found (for the columns: ResponseId, Q29 and PROLIFIC_PID)
+- excluded any rows where ALL of the columns (12 to 49, i.e. AI_Tools_List_1 to anything_else) are empty/NA
+
+```{r}
+# Cleaning the data:
+dat_trad_clean <- dat_trad %>%
+  filter(consent_form == "Yes, I have read the Participant Information Sheet, Privacy Notice and Consent Form and AGREE to take part in this study.") %>% ## Selecting only those that consented to partaking in the study
+  filter(Progress == 100) %>% ## Filtering out those that don't have 100% Progress
+  filter(DistributionChannel != "preview") %>% ## Filtering out those that are previews (i.e. test responses, not actual responses)
+  filter(Status == "IP Address") %>% ## Filtering out the Survey Previews
+  filter(Finished == TRUE) %>% ## Filtering out those that are unfinished
+  group_by(ResponseId) %>%
+  filter(n() == 1) %>%  # Keep only IDs that appear exactly once (NO DUPLICATES)
+  ungroup() %>%
+  filter(if_any(AI_Tools_List_1:anything_else, ~ !is.na(.) & . != "")) # Removes any rows where all of those columns (AI_Tools_List_1 to anything_else) are empty/NA
+
+
+dat_prol_clean <- dat_prol %>%
+  filter(consent_form == "Yes, I have read the Participant Information Sheet, Privacy Notice and Consent Form and AGREE to take part in this study.") %>% ## Selecting only those that consented to partaking in the study
+  filter(Progress == 100) %>% ## Filtering out those that don't have 100% Progress
+  filter(DistributionChannel != "preview") %>% ## Filtering out those that are previews (i.e. test responses, not actual responses)
+  filter(Status == "IP Address") %>% ## Filtering out the Survey Previews
+  filter(Finished == TRUE) %>% ## Filtering out those that are unfinished
+  group_by(ResponseId) %>%
+  filter(n() == 1) %>%  # Keep only IDs that appear exactly once (NO DUPLICATES)
+  ungroup() %>%
+  filter(if_any(AI_Tools_List_1:anything_else, ~ !is.na(.) & . != "")) %>% # Removes any rows where all of those columns (AI_Tools_List_1 to anything_else) are empty/NA
+  group_by(Q29) %>%
+  filter(n() == 1) %>%  # Keep only IDs that appear exactly once (NO DUPLICATES)
+  ungroup() %>%
+  group_by(PROLIFIC_PID) %>%
+  filter(n() == 1) %>%  # Keep only IDs that appear exactly once (NO DUPLICATES)
+  ungroup()
+
+```
+
+
+# Counting original sample size:
+```{r}
+# Data collected via traditional route:
+#
+## Counting original sample size (before exclusion criteria):
+trad_raw_n <- nrow(dat_trad)
+trad_raw_n
+
+#
+## + Filtering to exclude preview/test responses:
+trad_excl_prev <- dat_trad %>%
+  filter(DistributionChannel != "preview") %>%
+  filter(Status == "IP Address") %>%
+  nrow()
+trad_excl_prev
+
+#
+## + Filtering to only include those who consented:
+trad_excl_con <- dat_trad %>%
+  filter(DistributionChannel != "preview") %>%
+  filter(Status == "IP Address") %>%
+  filter(consent_form == "Yes, I have read the Participant Information Sheet, Privacy Notice and Consent Form and AGREE to take part in this study.") %>%
+  nrow()
+trad_excl_con
+
+#
+## + Filtering to ONLY include finished responses:
+trad_excl_fin <- dat_trad %>%
+  filter(DistributionChannel != "preview") %>%
+  filter(Status == "IP Address") %>%
+  filter(consent_form == "Yes, I have read the Participant Information Sheet, Privacy Notice and Consent Form and AGREE to take part in this study.") %>%
+  filter(Progress == 100) %>% # 12 rows
+  filter(Finished == TRUE) %>%
+  nrow()
+trad_excl_fin
+
+#
+## + Removing any rows where all of those columns (AI_Tools_List_1 to anything_else) are empty/NA:
+trad_excl_NA <- dat_trad %>%
+  filter(DistributionChannel != "preview") %>%
+  filter(Status == "IP Address") %>%
+  filter(consent_form == "Yes, I have read the Participant Information Sheet, Privacy Notice and Consent Form and AGREE to take part in this study.") %>%
+  filter(Progress == 100) %>% # 12 rows
+  filter(Finished == TRUE) %>%
+  filter(if_any(AI_Tools_List_1:anything_else, ~ !is.na(.) & . != "")) %>%
+  nrow()
+trad_excl_NA
+
+# 
+## + Filtering to exclude duplicate responses:
+trad_excl_dup <- dat_trad %>%
+  filter(DistributionChannel != "preview") %>%
+  filter(Status == "IP Address") %>%
+  filter(consent_form == "Yes, I have read the Participant Information Sheet, Privacy Notice and Consent Form and AGREE to take part in this study.") %>%
+  filter(Progress == 100) %>% # 12 rows
+  filter(Finished == TRUE) %>%
+  filter(if_any(AI_Tools_List_1:anything_else, ~ !is.na(.) & . != "")) %>%
+  group_by(ResponseId) %>%
+  filter(n() == 1) %>%
+  ungroup() %>%
+  nrow()
+trad_excl_dup
+
+
+####   
+
+# Data collected via Prolific route:
+#
+## Counting original sample size (before exclusion criteria):
+prol_raw_n <- nrow(dat_prol)
+prol_raw_n
+
+#
+## + Filtering to exclude preview/test responses:
+prol_excl_prev <- dat_prol %>%
+  filter(DistributionChannel != "preview") %>%
+  filter(Status == "IP Address") %>%
+  nrow()
+prol_excl_prev
+  
+#
+## + Filtering to only include those who consented:
+prol_excl_con <- dat_prol %>%
+  filter(DistributionChannel != "preview") %>%
+  filter(Status == "IP Address") %>%
+  filter(consent_form == "Yes, I have read the Participant Information Sheet, Privacy Notice and Consent Form and AGREE to take part in this study.") %>%
+  nrow()
+prol_excl_con
+
+#
+## + Filtering to ONLY include finished responses:
+prol_excl_fin <- dat_prol %>%
+  filter(DistributionChannel != "preview") %>%
+  filter(Status == "IP Address") %>%
+  filter(consent_form == "Yes, I have read the Participant Information Sheet, Privacy Notice and Consent Form and AGREE to take part in this study.") %>%
+  filter(Progress == 100) %>%
+  filter(Finished == TRUE) %>%
+  nrow()
+prol_excl_fin
+
+
+#
+## + Removing any rows where all of those columns (AI_Tools_List_1 to anything_else) are empty/NA:
+prol_excl_NA <- dat_prol %>%
+  filter(DistributionChannel != "preview") %>%
+  filter(Status == "IP Address") %>%
+  filter(consent_form == "Yes, I have read the Participant Information Sheet, Privacy Notice and Consent Form and AGREE to take part in this study.") %>%
+  filter(Progress == 100) %>%
+  filter(Finished == TRUE) %>%
+  filter(if_any(AI_Tools_List_1:anything_else, ~ !is.na(.) & . != "")) %>%
+  nrow()
+prol_excl_NA
+
+# 
+## + Filtering to exclude duplicate responses:
+prol_excl_dup <- dat_prol %>%
+  filter(DistributionChannel != "preview") %>%
+  filter(Status == "IP Address") %>%
+  filter(consent_form == "Yes, I have read the Participant Information Sheet, Privacy Notice and Consent Form and AGREE to take part in this study.") %>%
+  filter(Progress == 100) %>%
+  filter(Finished == TRUE) %>%
+  filter(if_any(AI_Tools_List_1:anything_else, ~ !is.na(.) & . != "")) %>%
+  group_by(ResponseId) %>%
+  filter(n() == 1) %>%
+  ungroup() %>%
+  group_by(Q29) %>%
+  filter(n() == 1) %>%
+  ungroup() %>%
+  group_by(PROLIFIC_PID) %>%
+  filter(n() == 1) %>%
+  ungroup() %>%
+  nrow()
+prol_excl_dup
+
+```
+
+
+### Count of exclusions at each stage (trad AND prolific):
+```{r}
+# Stats of n excluded according to what reason (trad then prolific):
+excl_raw_n <- trad_raw_n + prol_raw_n 
+excl_raw_n # n raw data responses
+excl_raw_removals <- 0
+
+## + Filtering to exclude "Prefer not to say" responses from trad data:
+excl_prefNOT <- excl_raw_n - excl_prefNOT_n # n left, after prefNOT exclusions
+
+## + Filtering to exclude preview/test responses:
+excl_prev <- trad_excl_prev + prol_excl_prev # n left, after preview/test exclusions
+excl_prev_n <- excl_raw_n - excl_prev
+excl_prev_n # n removed due to preview/test exclusions
+
+## + Filtering to only include those who consented:
+excl_con <- trad_excl_con + prol_excl_con # n left, after consent exclusions
+excl_con_n <- excl_prev - excl_con
+excl_con_n # n removed due to consent exclusions
+
+## + Filtering to ONLY include finished responses:
+excl_fin <- trad_excl_fin + prol_excl_fin # n left, after finished exclusions
+excl_fin_n <- excl_con - excl_fin
+excl_fin_n # n removed due to finished exclusions
+
+## + Removing any rows where all of those columns (AI_Tools_List_1 to anything_else) are empty/NA:
+excl_NA <- trad_excl_NA + prol_excl_NA # n left, after NA exclusions
+excl_NA_n <- excl_fin - excl_NA
+excl_NA_n # n removed due to NA exclusions
+
+## + Filtering to exclude duplicate responses:
+excl_dup <- trad_excl_dup + prol_excl_dup  # n left, after duplicate exclusions
+excl_dup_n <- excl_NA - excl_dup
+excl_dup_n # n removed due to duplicate exclusions
+
+
+## + Manually checking if there's any unusual uniformity in participant responses (i.e. if someone went through and just picked the same answer to everything to speed through the survey) + if the Part 1 and Part 2 survey answers match logically (e.g. a mismatch is if someone say they rarely/never use AI, but then in Part 2 mention they use it.)
+excl_unif_n <- 0 # n removed due to uniformity/mismatch exclusions
+excl_unif <- excl_dup - excl_unif_n # n left, after uniformity/mismatch exclusions
+
+```
+
+
+### Table of exclusions at each stage:
+```{r}
+excl_count <- tibble(
+  order = 0:7,
+  description = c(
+    "Raw data",
+    "Including only neurodivergent responses",
+    "Removing preview/test responses",
+    "Including only those who consented to participation",
+    "Including only completed responses",
+    "Removing empty/NA responses",
+    "Removing duplicate responses",
+    "Removing suspiciously uniform/mismatched responses"
+  ),
+  n_removed = c(
+    excl_raw_removals,
+    excl_prefNOT_n,
+    excl_prev_n,
+    excl_con_n,
+    excl_fin_n,
+    excl_NA_n,
+    excl_dup_n,
+    excl_unif_n
+  ),
+  n_left = c(
+    excl_raw_n,
+    excl_prefNOT,
+    excl_prev,
+    excl_con,
+    excl_fin,
+    excl_NA,
+    excl_dup,
+    excl_unif
+  )
+)
+
+excl_count
+
+```
+
+
+
+# Wide to Long
+```{r}
+# Pivoting from wide to long:
+dat_trad_long <- dat_trad_clean %>%
+  mutate(across(-c(ResponseId), as.character)) %>%
+  pivot_longer(
+    cols = -c(ResponseId),
+    names_to = "Question",
+    values_to = "Answer"
+  )
+
+
+dat_prol_long <- dat_prol_clean %>%
+  mutate(across(-c(ResponseId), as.character)) %>%
+  pivot_longer(
+    cols = -c(ResponseId),
+    names_to = "Question",
+    values_to = "Answer"
+  )
+
+```
+
+
+# Combining data sets
+```{r}
+# Combining the two data sets, but labelling which IDs come from which:
+
+dat_comb <- bind_rows(
+  dat_trad_long %>% mutate(Recruitment = "Traditional"),
+  dat_prol_long %>% mutate(Recruitment = "Prolific")
+) %>%
+  select(ResponseId, Recruitment, everything())
+
+dat_comb
+
+
+
+# Combining the wide format trad and prol data:
+
+dat_wide_comb <- dat_comb %>%
+  pivot_wider(names_from = Question,
+              values_from = Answer)
+
+dat_wide_comb
+
+```
+
+
+# Matching IDs with the qual dataset:
+```{r}
+# To clarify, cleaned and combined data from this Rmarkdown was used for the qualitative analysis. During that analysis, IDs were added (to make them easier to identify than just purely using ResponseIds), and open-text responses were judged for if they seemed written by generative AI rather than the participants, using interrater agreement. So here I'm backtracking and taking the IDs produced during the qual analysis and adding them to the combined dataset here.
+# To do this, I downloaded demos.csv (last modified on 3 July 2025 by Jade Burke):
+dat_qual_IDs <- read_csv("data/demos.csv") %>%
+  pivot_wider(names_from = Question,
+              values_from = Answer) %>%
+  select(Pseudonym, ResponseId)
+
+dat_qual_IDs
+
+
+# Adding qual IDs to matching ResponseId in dat_wide_comb
+dat_wide_comb <- inner_join(dat_qual_IDs, dat_wide_comb, by = "ResponseId") # beware that you have to rerun the "Combining the wide format trad and prol data" bit above this first before running just this bit of code on its own, otherwise if you keep rerunning just this bit you'll get lots of repeated rows that'll keep growing each time like a clone army.
+
+dat_wide_comb
+
+
+# Making sure dat_comb has the qual IDs:
+dat_comb <- dat_wide_comb %>%
+  pivot_longer(
+    cols = -c(Pseudonym, ResponseId, Recruitment),
+    names_to = "Question",
+    values_to = "Answer"
+  )
+
+```
+
+
+# Removing suspicous IDs (identified as AI by Jade Burke & Helena Paterson via interrater agreement assessment):
+```{r}
+# from the "demos" tab in the "selected_questions - SS coding" XLSX file in the analysis_open_responses folder:
+
+# Flagged IDs from qual data for removal: ID15, ID21, ID30, ID53, ID8 (5 responses total removed from quant and qual analysis)
+dat_comb <- dat_comb %>%
+  filter(
+    !Pseudonym %in% c(
+      "Participant_15",
+      "Participant_21",
+      "Participant_30",
+      "Participant_53",
+      "Participant_8"
+    ))
+
+
+dat_wide_comb <- dat_wide_comb %>%
+  filter(
+    !Pseudonym %in% c(
+      "Participant_15",
+      "Participant_21",
+      "Participant_30",
+      "Participant_53",
+      "Participant_8"
+    ))
+
+```
+
+
+### Adding this as a stage in the exclusions count table:
+MAKE SURE to restart R session and outputs, because if you don't and keep re-running the code, there will be lots of duplicate rows.
+
+```{r}
+excl_AI_n <- length(c("ID15", "ID21", "ID30", "ID53", "ID8")) # n removed, to exclude AI generated responses
+excl_AI <- excl_dup - excl_AI_n # n left, after removing AI generated responses
+
+excl_count <- excl_count %>%
+  add_row(order = 8,
+          description = "Removing suspected AI generated open text responses",
+          n_removed = excl_AI_n,
+          n_left = excl_AI)
+
+excl_count
+
+```
+
+
+### Saving exclusions table:
+```{r}
+write_csv(excl_count, "data/excl_count.csv")
+
+```
+
+
+
+# Do the qual and quant datasets match? Because there should be the same ResponseIDs in each.
+```{r}
+# The qual data:
+dat_qual <- read_csv("data/demos.csv")
+
+dat_qual
+
+# What IDs can we see for qual?
+dat_qual_IDs <- dat_qual_IDs %>%
+  filter(
+    !Pseudonym %in% c(
+      "Participant_15",
+      "Participant_21",
+      "Participant_30",
+      "Participant_53",
+      "Participant_8"
+    )) # removing the responses flagged as AI generated from the dat_qual_IDs
+
+dat_qual_IDs
+
+
+# The quan data:
+dat_comb_IDs <- dat_comb %>%
+  group_by(Pseudonym) %>%
+  count()
+
+dat_comb_IDs
+
+
+# DO THEY MATCH!?
+# Use full_join because it keeps all observations in both data set x and y, so you'll see null results if there's a mismatch
+dat_match <- full_join(
+  x = dat_qual_IDs,
+  y = dat_comb_IDs,
+  by = c("Pseudonym")
+)
+
+dat_match
+
+
+# Results:
+## Well, both dat_comb and dat_qual_IDs have 56 responses each.
+## dat_match also has 56 responses total and no null results
+
+```
+
+
+
+# When to when did the surveys collect responses?
+```{r}
+# When to when did the survey collect responses from?
+## If I type "StartDate" in the search bar of dat_comb, I get 61 rows of entries, and the dates range from: 23/01/2025 09:33 to 2025-04-15 09:00:10.
+
+## If I type "EndDate" in the search bar of dat_comb, I get 61 rows of entries, and the dates range from: 23/01/2025 09:39 to 2025-04-15 09:12:39.
+
+# Overall, the dat_comb responses (of the final sample) were collected between 23/01/2025 09:33 and 2025-04-15 09:12:39.
+
+
+# As for when the non-preview responses were collected:
+# 
+dat_trad %>%
+  filter(DistributionChannel != "preview") %>%
+  filter(Status == "IP Address")
+## 2025-02-08 09:03:57 to 2025-04-15 09:12:39
+
+dat_prol %>%
+  filter(DistributionChannel != "preview") %>%
+  filter(Status == "IP Address")
+## 23/01/2025 09:33 to 23/01/2025 10:43
+
+# Overall, 23/01/2025 09:33 to 2025-04-15 09:12:39.
+
+```
+
+
+# Who was recruited from Prolific vs Traditional method:
+```{r}
+# Who was recruited from Prolific vs Traditional method:
+trad_recruit_count <- dat_comb %>%
+  group_by(ResponseId) %>%
+  filter(Recruitment == "Traditional") %>%
+  count() %>%
+  ungroup() %>%
+  nrow()
+
+trad_recruit_count
+
+prol_recruit_count <- dat_comb %>%
+  group_by(ResponseId) %>%
+  filter(Recruitment == "Prolific") %>%
+  count() %>%
+  ungroup() %>%
+  nrow()
+
+prol_recruit_count
+
+```
+
+
+
+# Open responses/Qual analysis dataset:
+```{r}
+# Filtering to focus on sections of the responses relevant to the qual analysis:
+dat_open <- dat_comb %>%
+  filter(!Question %in% paste0("AI_Tools_List_", 1:25)) ## Filters out AI_Tools_List_1 to AI_Tools_List_25
+
+```
+
+
+# Saving as
+```{r}
+# Saving the combined dataset:
+write_csv(dat_comb, "data/dat_comb.csv")
+
+# Saving the filtered open responses:
+write_csv(dat_open, "data/dat_open.csv")
+
+```
+
+
+# Presentation
+
+- Snapshot of the study
+
+## Sample size:
+```{r}
+# final sample size
+
+sample_n <- dat_comb %>%
+  group_by(ResponseId) %>%
+  count() %>% # n rows, i.e. n ResponseIds i.e. n unique participants
+  nrow()
+  
+sample_n
+
+```
+
+
+## Age:
+```{r}
+# demographics of the final sample
+
+# age:
+
+dat_age <- dat_comb %>%
+  filter(Question == "age") %>%
+  mutate(Answer = as.numeric(Answer))  # convert age to numeric
+
+
+# the summary statistics:
+summ_age <- dat_age %>%
+  mutate(age = as.numeric(Answer)) %>%
+  summarise(
+    n = n(),
+    age_min = min(age),
+    age_1st_Qu = quantile(age, 0.25, names = FALSE),
+    age_med = median(age),
+    age_3rd_Qu = quantile(age, 0.75, names = FALSE),
+    age_max = max(age),
+    age_mean = mean(age),
+    age_sd = sd(age)
+  )
+
+summ_age
+
+summary(dat_age) # min & max (for age range)
+
+
+# Violin box-plot distribution of the ages:
+plot_age <- ggplot(dat_age %>% mutate(group = "Age"), 
+                   aes(x = group, y = Answer, fill = group)) +
+  #
+  ## Colouring quartiles in the background:
+  geom_rect(xmin = -Inf, ymin = summ_age$age_min, xmax = Inf, ymax = summ_age$age_1st_Qu, fill = "grey0", alpha = 0.03) +
+  geom_rect(xmin = -Inf, ymin = summ_age$age_1st_Qu, xmax = Inf, ymax = summ_age$age_med, fill = "grey25", alpha = 0.03) +
+  geom_rect(xmin = -Inf, ymin = summ_age$age_med, xmax = Inf, ymax = summ_age$age_3rd_Qu, fill = "grey50", alpha = 0.03) +
+  geom_rect(xmin = -Inf, ymin = summ_age$age_3rd_Qu, xmax = Inf, ymax = summ_age$age_max, fill = "grey80", alpha = 0.03) +
+  #
+  ## Drawing the violin boxplot:
+  geom_violin(trim = TRUE, show.legend = FALSE, alpha = 0, fill = "white", colour = "black") +
+  geom_boxplot(width = 0.2, show.legend = FALSE, fill = "white", colour = "black") +
+  #
+  ## Labels:
+  scale_x_discrete(name = "", labels = c("Age Distribution")) +
+  scale_y_continuous(name = "Age (years)") +
+  #
+  ## Annotation(s):
+  annotate("label", x = 1.3, y = summ_age$age_med,
+    label = paste0(round(summ_age$age_med, 3), " years"),
+    fill = "white", colour = "black")
+  
+plot_age
+
+
+## To save plot_age as high-resolution PNG, remove the # from the following code:
+ggsave("figures/plot_age.png", plot_age, width = 6, height = 5, dpi = 120)
+
+```
+
+
+## Gender:
+```{r}
+# gender:
+
+dat_gender <- dat_comb %>%
+  filter(Question == "gender")
+
+
+# the summary statistics:
+summ_gender <- dat_gender %>%
+  group_by(Answer) %>%
+  summarise(
+    n = n()
+  ) %>%
+  mutate(percentage = round(n / sum(n) * 100, 1)) %>% # one decimal place
+  ungroup()
+
+summ_gender
+
+
+# Desired order for plot_gender:
+order_gender <- c(
+  "Female",
+  "Male",
+  "Non-binary"
+)
+
+summ_gender <- summ_gender %>%
+  mutate(order = factor(Answer, levels = order_gender))
+
+
+# Plot for gender proportions:
+plot_gender <- summ_gender %>%
+  ggplot(aes(x = order, y = n, fill = order)) +
+  geom_col(width = 0.7, colour = "black", fill = "black") +
+  labs(x = "Gender Identity",
+       y = "Count") +
+  theme(legend.position = "none") +
+  coord_flip() +
+  geom_text(aes(x = order, y = n, label = n), nudge_y = 3) + # labels for columns
+  scale_fill_grey(start = 1, end = 0) # to be colour-blind & black-white printing friendly
+
+plot_gender
+
+
+## To save plot_gender as high-resolution PNG, remove the # from the following code:
+ggsave("figures/plot_gender.png", plot_gender, width = 6, height = 5, dpi = 120)
+
+```
+
+
+## Position at UK Uni:
+```{r}
+# position:
+
+dat_position <- dat_comb %>%
+  filter(Question == "position") %>%
+  mutate(
+    Answer = replace_na(Answer, "No Response"), # replace NA with "No Response"
+    Answer = recode(Answer,
+                    "Other, please state" = "Other") # rename Other option
+  )
+
+
+# the summary statistics:
+summ_position <- dat_position %>%
+  group_by(Answer) %>%
+  summarise(
+    n = n()
+  ) %>%
+  mutate(percentage = round(n / sum(n) * 100, 1)) %>% # one decimal place
+  ungroup()
+
+summ_position
+
+
+# Desired order for plot_gender:
+order_position <- c(
+  "Student",
+  "Staff",
+  "Professional Services",
+  "Other",
+  "No Response"
+)
+
+summ_position <- summ_position %>%
+  mutate(order = factor(Answer, levels = order_position))
+
+
+# Plot for gender proportions:
+plot_position <- summ_position %>%
+  ggplot(aes(x = order, y = n, fill = order)) +
+  geom_col(width = 0.7, colour = "black", fill = "black") +
+  labs(x = "Position at UK University",
+       y = "Count") +
+    theme(
+    legend.position = "none"
+  ) +
+  coord_flip() +
+  geom_text(aes(x = order, y = n, label = n), nudge_y = 3) + # labels for columns
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 15)) + # wraps the y-axis text
+  scale_fill_grey() # to be colour-blind & black-white printing friendly
+
+plot_position
+
+
+## To save plot_position as high-resolution PNG, remove the # from the following code:
+ggsave("figures/plot_position.png", plot_position, width = 6, height = 5, dpi = 120)
+
+```
+
+
+## Neurodivergence:
+```{r}
+# Neurodivergence:
+
+dat_neurod <- dat_comb %>%
+  filter(Question == "neurodivergent") %>%
+  mutate(Answer = recode(Answer,
+                         "Yes\nPlease specify:" = "Yes",
+                         .default = Answer)) # must include \n otherwise it won't read the "Yes Please specify:"
+
+
+# the summary statistics:
+summ_neurod <- dat_neurod %>%
+  group_by(Answer) %>%
+  summarise(
+    n = n()
+  ) %>%
+  mutate(percentage = round(n / sum(n) * 100, 1)) %>% # one decimal place
+  ungroup()
+
+summ_neurod
+
+
+# Plot for neurodivergency proportions:
+plot_neurod <- summ_neurod %>%
+  mutate(Answer_wrapped = str_wrap(Answer, width = 10)) %>%  # wrap long labels at ~10 chars
+  ggplot(aes(x = fct_rev(fct_reorder(Answer_wrapped, n)), y = n, fill = Answer_wrapped)) +
+  geom_col(width = 0.7, colour = "black", fill = "black") +
+  labs(x = "Neurodivergent",
+       y = "Count") +
+  theme(
+    legend.position = "none") +
+  coord_flip() +
+  geom_text(aes(label = n), nudge_y = 4) + # labels for columns
+  scale_fill_grey() # to be colour-blind & black-white printing friendly
+  
+
+plot_neurod
+
+
+## To save plot_neurod as high-resolution PNG, remove the # from the following code:
+ggsave("figures/plot_neurod.png", plot_neurod, width = 6, height = 5, dpi = 120)
+
+```
+
+
+### What category of neurodivergent?
+```{r}
+dat_neurod_specify <- dat_comb %>%
+  filter(Question == c("neurodivergent_1_TEXT"))
+
+# Saving this table so I can code it by hand to find out the count for e.g. N said Autism, Y said ADHD, etc.
+write_csv(dat_neurod_specify, "data/dat_neurod_specify.csv")
+
+```
+
+
+BEWARE! You must MANUALLY recode the specific type of neurodivergence! It needs a human eye! The recoding is NOT automated because of the variation in how participants wrote about the same type of neurodivergence.
+
+PLEASE date and name who recoded the data, if you decide to recode it yourself e.g. dat_neurod_specify_recoded-2026-08-20_bySaraEftekhari.csv
+
+It's VERY IMPORTANT to NOT use a space BEFORE AND AFTER the commas when you're recoding.
+
+```{r}
+# Loading in the recoded neurodivergent categories:
+dat_neurod_recoded <- read_csv("data/dat_neurod_specify_recoded-2026-08-20_bySaraEftekhari.csv")
+
+dat_neurod_recoded
+
+
+# Counting the types of neurodivergent categories (CO-OCCURANCE ALLOWED):
+# the summary statistics:
+summ_neurod_recoded <- dat_neurod_recoded %>%
+  group_by(Recoding) %>%
+  summarise(n = n()) %>%
+  filter(Recoding != "NA") %>% # removes the NA responses
+  mutate(percentage = round(n / sum(n) * 100, 1)) %>% # one decimal place
+  ungroup()
+
+summ_neurod_recoded %>%
+  arrange(desc(n)) # sorts from largest to smallest n
+
+
+# Counting neurodivergent categories INDIVIDUALLY:
+summ_neurod_recoded_indiv <- dat_neurod_recoded %>%
+  separate_rows(Recoding, sep = ",") %>% # splits up the categories separated by a comma originally
+  count(Recoding, name = "n") %>%
+  filter(Recoding != "NA") %>% # removes the NA responses
+  mutate(percentage = round(n / sum(n) * 100, 1))
+
+summ_neurod_recoded_indiv %>%
+  arrange(desc(n)) # sorts from largest to smallest n
+
+
+# Saving count of neurodivergent categories:
+write_csv(summ_neurod_recoded_indiv, "data/dat_neurod_count.csv")
+
+```
+
+
+
+## Ethnicity:
+```{r}
+# ethnicity:
+
+dat_ethnicity <- dat_comb %>%
+  filter(Question == "ethnicity") %>%
+  mutate(Answer = recode(Answer,
+    # Asian or Asian British
+    "Indian" = "Asian",
+    "Pakistani" = "Asian",
+    "Bangladeshi" = "Asian",
+    "Chinese" = "Asian",
+    "North Asian" = "Asian",
+    "East Asian (other than Chinese)" = "Asian",
+    "South Asian (other than Indian, Pakistani, or Bangladeshi)" = "Asian",
+    "Southeast Asian" = "Asian",
+    "Central Asian" = "Asian",
+    "Middle Eastern" = "Asian",
+    "Any other Asian background\nPlease specify:" = "Asian",
+    
+    # Black, Black British, Caribbean or African
+    "Caribbean" = "Black",
+    "North African" = "Black",
+    "West African" = "Black",
+    "East African" = "Black",
+    "Central African" = "Black",
+    "Southern African (e.g. South African, Zimbabwean, etc.)" = "Black",
+    "Any other Black, Black British, Caribbean or African background\nPlease specify:" = "Black",
+    
+    # White
+    "English, Welsh, Scottish, Northern Irish or British" = "White",
+    "Irish" = "White",
+    "European" = "White",
+    "Any other White background\nPlease specify:" = "White",
+    
+    # Indigenous Peoples
+    "Native American or First Nations" = "Indigenous",
+    "Aboriginal or Torres Strait Islander" = "Indigenous",
+    "Pacific Islander" = "Indigenous",
+    "Any other Indigenous background\nPlease specify:" = "Indigenous",
+    
+    # Other Ethnic Groups
+    "Arab" = "Other",
+    "Latin American" = "Other",
+    "Gypsy, Roma or Traveller" = "Other",
+    "Other ethnic background\nPlease specify:" = "Other",
+    
+    # Mixed or Multiple
+    "White and Black Caribbean" = "Mixed",
+    "White and Black African" = "Mixed",
+    "White and Asian" = "Mixed",
+    "Any other Mixed or Multiple ethnic background\nPlease specify:" = "Mixed"
+  ))
+
+
+# the summary statistics:
+summ_ethnicity <- dat_ethnicity %>%
+  group_by(Answer) %>%
+  summarise(n = n()) %>%
+  mutate(percentage = round(n / sum(n) * 100, 1)) %>% # one decimal place
+  ungroup()
+
+summ_ethnicity
+
+
+# Desire order for plot_ethnicity:
+order_ethnicity <- c(
+  "White",
+  "Black",
+  "Mixed",
+  "Asian",
+  "Prefer not to say"
+)
+
+summ_ethnicity <- summ_ethnicity %>%
+  mutate(order = factor(Answer, levels = order_ethnicity))
+
+
+# Plot for ethnicity proportions:
+plot_ethnicity <- summ_ethnicity %>%
+  ggplot(aes(x = order, y = n, fill = order)) +
+  geom_col(width = 0.7, colour = "black", fill = "black") +
+  labs(x = "Ethnicity Broad Category",
+       y = "Count") +
+  theme(
+    legend.position = "none"
+  ) +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 10)) + # wraps text
+  coord_flip() +
+  geom_text(aes(label = n), nudge_y = 2) + # labels for columns
+  scale_fill_grey() # to be colour-blind & black-white printing friendly
+
+plot_ethnicity
+
+
+## To save plot_ethnicity as high-resolution PNG, remove the # from the following code:
+ggsave("figures/plot_ethnicity.png", plot_ethnicity, width = 6, height = 5, dpi = 120)
+
+```
+
+
+# Top tools! + common uses
+
+## Key
+```{r}
+# key for AI Tools use type:
+
+AI_tools <- c(
+  "ChatGPT", "ClickUp", "Connected Papers", "Copilot", "DeepL", "Elicit",
+  "Fireflies.ai", "Gamma", "Gemini", "goblin.tools", "Grammarly", "Hemingway Editor",
+  "Jasper", "Litmaps", "Motion", "Notion", "Otter.ai", "Perplexity", "ProWritingAid",
+  "Quillbot", "Research Rabbit", "Scholarcy", "Scite", "Slick Write", "Zoom AI Companion"
+)
+
+key <- tibble(
+  Question = paste0("AI_Tools_List_", 1:25),
+  Description = AI_tools
+)
+
+```
+
+
+## Filtering tool uses
+```{r}
+# tool use type:
+
+dat_ai_tools <- dat_comb %>%
+  filter(Question %in% paste0("AI_Tools_List_", 1:25)) %>%
+  left_join(key, by = "Question") %>%
+  mutate(Answer = recode(Answer,
+                         "Academic Use,Non-academic Use" = "Academic and Non-academic Use",
+                         "Academic Use" = "Academic Use",
+                         "Non-academic Use" = "Non-academic Use",
+                         "I have NOT heard of it before and NOT USED it" = "NOT Heard and NOT Used",
+                         "I have heard of it before but NOT USED it" = "Heard and NOT Used",
+                         .default = "No Response",
+                         .missing = "No Response"
+                         ))
+
+```
+
+
+## Summary Stats
+```{r}
+# summary tool use statistics:
+
+summ_tool_use <- dat_ai_tools %>%
+  group_by(Description, Answer) %>%
+  summarise(n = n()) %>%
+  ungroup() %>%
+  mutate(percentage = round(n / sum(n) * 100, 1)) # total sum(n) across all rows
+
+summ_tool_use
+
+```
+
+```{r}
+categories <- c(
+  "Academic and Non-academic Use",
+  "Academic Use",
+  "Non-academic Use",
+  "Heard and NOT Used",
+  "NOT Heard and NOT Used",
+  "No Response"
+)
+
+summ_tool_use <- dat_ai_tools %>%
+  mutate(Answer = factor(Answer, levels = categories)) %>%
+  count(Description, Answer, name = "n") %>%
+  group_by(Description) %>%
+  complete(Answer = categories, fill = list(n = 0)) %>%
+  mutate(percentage = round(n / sum(n) * 100, 1)) %>% # total sum(n) across all rows 
+  ungroup() %>%
+  filter(Answer != "No Response") %>% # removing
+  filter(Answer != "NOT Heard and NOT Used") %>% # removing
+  #
+  ## Ordering:
+  mutate(
+    Answer = factor(
+      Answer,
+      levels = c(
+        "Academic Use",
+        "Non-academic Use",
+        "Academic and Non-academic Use",
+        "Heard and NOT Used"
+      )
+    )
+  )
+
+summ_tool_use
+
+```
+
+
+## Heatmap
+```{r}
+# Ordering based on Academic Use count:
+academic_order <- summ_tool_use %>%
+  filter(Answer == "Academic Use") %>%
+  arrange(desc(n)) %>%
+  pull(Description)
+
+summ_tool_use <- summ_tool_use %>%
+  mutate(Description = factor(Description, levels = academic_order)) %>% # orders according to Academic Use count
+  mutate(text_col = if_else(n >= quantile(n, 0.99), "white", "black")) # changes heatmap text label colour based on background colour
+
+# Heatmap plot for tool use:
+plot_ai_use_heatmap <- summ_tool_use %>%
+  ggplot(aes(
+    x = Answer,
+    y = Description,
+    fill = n
+  )) +
+  geom_tile(colour = "white") +
+  scale_x_discrete(
+    limits = c(
+      "Academic Use",
+      "Non-academic Use",
+      "Academic and Non-academic Use",
+      "Heard and NOT Used"
+    )) +
+#  scale_y_discrete(
+#    limits = c(
+#      "Zoom AI Companion", "Slick Write", "Scite", "Scholarcy", "Research Rabbit", "Quillbot", "ProWritingAid", "Perplexity", "Otter.ai", "Notion", "Motion", "Litmaps", "Jasper", "Hemingway Editor", "Grammarly", "goblin.tools", "Gemini", "Gamma", "Fireflies.ai", "Elicit", "DeepL", "Copilot", "Connected Papers", "ClickUp", "ChatGPT"
+#)) +
+  labs(x = "Participant Usage & Familiarity",
+    y = "AI Tool Name"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_gradientn(colours = gray.colors(100, start = 0.99, end = 0.01), name = "Count") +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 20)) + # wraps the y-axis text
+  geom_text(aes(label = n, colour = text_col)) +
+  scale_colour_identity()
+
+plot_ai_use_heatmap
+
+## To save plot_ai_use_heatmap as high-resolution PNG, remove the # from the following code:
+ggsave("figures/plot_ai_use_heatmap.png", plot_ai_use_heatmap, width = 9, height = 9, dpi = 120)
+
+```
+
+
+## Tools used!
+```{r}
+dat_tools_used <- dat_ai_tools %>%
+  filter(Answer %in% c("Academic Use", "Non-academic Use", "Academic and Non-academic Use", "Heard and NOT Used")) # as of v1.7, I'm adding Heard and NOT Used as well for the top 5 tools. I realise this is incongruous with the title of top 5 tools "used" but it'll take too long changing all the names, and the downstream impact of that would also be too time consuming to fix, so we're sticking with this.
+
+summ_tools_used <- dat_tools_used %>%
+  group_by(Description, Answer) %>% # what tools respondents used + use type
+  summarise(n = n()) %>%
+  ungroup() %>%
+  mutate(percentage = round(n / sum(n) * 100, 1)) # total sum(n) across all rows
+
+summ_tools_used
+
+```
+
+## Top 5 Tools Used:
+```{r}
+# Using the logic of "Within each use type, keep all tools whose count is greater than or equal to the 5th-highest count" i.e. it's top 5 tools but technically there will be more than 5 tools mentioned because some of the tools have a tied number of responses:
+
+top_ac <- summ_tools_used %>% 
+  filter(Answer == "Academic Use") %>%
+  mutate(rank = dense_rank(desc(n))) %>% # dense_rank() is a dplyr ranking function that assigns the same rank to tied values
+  filter(rank <= 5) %>%
+  select(-rank) # keeps the top 5 counts for tools and includes any ties
+
+
+top_ac # top 5 ai tools for academic purposes
+
+####
+
+top_non_ac <- summ_tools_used %>% 
+  filter(Answer == "Non-academic Use") %>%
+  mutate(rank = dense_rank(desc(n))) %>% # dense_rank() is a dplyr ranking function that assigns the same rank to tied values
+  filter(rank <= 5) %>%
+  select(-rank) # keeps the top 5 counts for tools and includes any ties
+
+
+top_non_ac # top 5 ai tools for non-academic purposes
+
+
+#### 
+
+top_ac_nonac <- summ_tools_used %>% 
+  filter(Answer == "Academic and Non-academic Use") %>%
+  mutate(rank = dense_rank(desc(n))) %>% # dense_rank() is a dplyr ranking function that assigns the same rank to tied values
+  filter(rank <= 5) %>%
+  select(-rank) # keeps the top 5 counts for tools and includes any ties
+
+
+top_ac_nonac # top 5 ai tools for academic and non-academic purposes
+
+
+#### 
+
+top_heard_NOTuse <- summ_tools_used %>% 
+  filter(Answer == "Heard and NOT Used") %>%
+  mutate(rank = dense_rank(desc(n))) %>% # dense_rank() is a dplyr ranking function that assigns the same rank to tied values
+  filter(rank <= 5) %>%
+  select(-rank) # keeps the top 5 counts for tools and includes any ties
+
+
+top_heard_NOTuse # top 5 ai tools that participants had heard of but NOT used
+
+
+###
+comb_use <- bind_rows(top_ac, top_non_ac, top_ac_nonac, top_heard_NOTuse)
+
+comb_use
+
+```
+
+## Plots for top 5 ai tool uses (including Heard but NOT Used)
+```{r}
+# Ordering the facets and the tool names:
+top_tools_levels <- c(
+  "Academic Use",
+  "Non-academic Use",
+  "Academic and Non-academic Use",
+  "Heard and NOT Used"
+)
+
+
+# Top tools plot:
+plot_top <- comb_use %>%
+  mutate(Answer = factor(Answer, levels = top_tools_levels), # ordering facets
+         Description = reorder_within(Description, -n, Answer)) %>% # ordering within facets
+  ggplot(aes(x = n, y = Description)) +
+  geom_col(colour = "black", fill = "black", width = 0.7) +
+  facet_wrap(~Answer, ncol = 2, scales = "free_y", space = "free_y") + # stacking facets vertically, and gets rid of labels on y-axis that doesn't have a value for that facet
+  labs(
+    x = "Count",
+    y = "AI Tool Name"
+  ) +
+  theme(
+    legend.position = "none",
+    legend.title = element_text(face = "bold")
+  ) +
+  geom_text(aes(label = n), nudge_x = 2) + # labels for y-axis
+  scale_y_reordered() # so tidytext doesn't mangle my plot
+
+
+plot_top
+
+
+## To save plot_top as high-resolution PNG, remove the # from the following code:
+ggsave("figures/plot_top_HEARDincl.png", plot_top, width = 8, height = 12, dpi = 120)
+
+```
+
+
+## Plots for top 5 ai tool uses (JUST the Used ones)
+```{r}
+# Ordering the facets and the tool names:
+top_tools_levels <- c(
+  "Academic Use",
+  "Non-academic Use",
+  "Academic and Non-academic Use"
+)
+
+
+# Top tools plot:
+plot_top <- comb_use %>%
+  filter(Answer != "Heard and NOT Used") %>%
+  mutate(Answer = factor(Answer, levels = top_tools_levels), # ordering facets
+         Description = reorder_within(Description, -n, Answer)) %>% # ordering within facets
+  ggplot(aes(x = n, y = Description)) +
+  geom_col(colour = "black", fill = "black", width = 0.7) +
+  facet_wrap(~Answer, ncol = 2, scales = "free_y", space = "free_y") + # stacking facets vertically, and gets rid of labels on y-axis that doesn't have a value for that facet
+  labs(
+    x = "Count",
+    y = "AI Tool Name"
+  ) +
+  theme(
+    legend.position = "none",
+    legend.title = element_text(face = "bold")
+  ) +
+  geom_text(aes(label = n), nudge_x = 2) + # labels for y-axis
+  scale_y_reordered() # so tidytext doesn't mangle my plot
+
+
+plot_top
+
+
+## To save plot_top as high-resolution PNG, remove the # from the following code:
+ggsave("figures/plot_top.png", plot_top, width = 8, height = 12, dpi = 120)
+
+```
+
+
+# Counting tools used (aggregate count across Used types)
+```{r}
+# I'm collapsing the "Academic Use", "Non-academic Use", and "Academic and Non-academic Use" into one broad "Use" category, per participant, per tool. This is to count how many participants said they "Use" a tool, regardless of what use type that is.
+
+## So this means grouping based on ResponseId and Description. It also means recoding the use types into one "Use" category.
+
+## dat_ai_tools is the go-to table.
+
+use_count <- dat_ai_tools %>%
+  # To recode, %in% is an R operator that checks whether each value on the left appears in a set of values on the right, giving "TRUE" or "FALSE":
+  mutate(
+    Use = Answer %in% c(
+      "Academic Use",
+      "Non-academic Use",
+      "Academic and Non-academic Use"
+    )
+  ) %>%
+  # Only getting "Use" category:
+  filter(Use == TRUE) %>%
+  # Group by ResponseId and Description for grouping by participant and tool:
+  group_by(ResponseId, Description) %>% # what tools respondents used
+  summarise(n = n()) %>%
+  ungroup() %>%
+  # In the survey, participants could pick "Academic Use" AND/OR "Non-academic Use". If they picked both, this got recoded as "Academic and Non-academic Use". Meaning any participant left with just "Academic Use" or "Non-academic Use" means there was no other use type. As in, a participant whose response was left as "Academic Use" did NOT select "Non-academic Use". And vice versa. So in reality "Academic Use", "Non-academic Use", and "Academic and Non-academic Use" SHOULD all be mutually exclusive, meaning the n = 1 is the check you're looking in the n column of use_count.
+
+  ## Which is exactly what we got! n = 1 for all!
+
+  # Now we need to count each tool:
+  group_by(Description) %>% # what tools respondents used
+  summarise(n = n()) %>%
+  ungroup() %>%
+  # We should see 25 tools. 
+  
+  arrange(desc(n)) # sorts from largest to smallest n
+
+
+use_count
+
+
+# Save as a CSV:
+write_csv(use_count, "data/use_count.csv")
+
+```
+
+
+
+# Frequency of usage
+```{r}
+dat_freq <- dat_comb %>%
+  filter(Question == c("academic_frequency", "nonacademic_frequenc"))
+
+```
+
+
+## Summary stats of frequency
+```{r}
+summ_freq <- dat_freq %>%
+  group_by(Question, Answer) %>% # type of use + frequency
+  summarise(n = n()) %>%
+  ungroup() %>%
+  tidyr::complete(Question, Answer, fill = list(n = 0)) %>% # makes sure summarise doesn't drop any frequencies with a 0 count
+  mutate(
+    percentage = round(n / sum(n) * 100, 1),
+    Question = recode(Question,
+                     "academic_frequency" = "Academic",
+                     "nonacademic_frequenc" = "Non-academic",
+                     .default = Question)
+  ) # total sum(n) across all rows
+
+summ_freq
+
+```
+
+
+## Plot for frequency + use type
+```{r}
+freq_levels <- c(
+  "daily or more",
+  "4-6 times a week",
+  "2-3 times a week",
+  "once a week",
+  "2-3 times a month",
+  "once a month",
+  "every 2-3 months",
+  "1-3 times a year",
+  "never"
+) # for custom ordering of the plot
+
+
+plot_freq <- summ_freq %>%
+  mutate(Answer = factor(Answer, levels = freq_levels)) %>%
+  ggplot(aes(x = Answer, y = n, fill = Question)) +
+  geom_col(position = position_dodge(width = 0.8), colour = "black", fill = "black", width = 0.7) +
+  facet_wrap(~ Question, ncol = 1) + # stacking facets vertically
+  scale_y_continuous(breaks = scales::pretty_breaks(), labels = scales::label_number(accuracy = 1)) +
+  labs(
+    x = "AI Tools Frequency of Use",
+    y = "Count"
+  ) +
+  theme(
+    legend.position = "none",
+    legend.title = element_text(face = "bold")
+  ) +
+  coord_flip() +
+  geom_text(aes(label = n), nudge_y = .5) # labels for columns
+
+plot_freq
+
+## To save plot_freq as high-resolution PNG, remove the # from the following code:
+ggsave("figures/plot_freq.png", plot_freq, width = 6, height = 7, dpi = 120)
+
+```
+
+
+# Generating citations to include in changelog:
+```{r}
+# To get the citations for this R Markdown version:
+docx_path <- grateful::cite_packages(
+  output = "file",
+  out.format = "docx", # will save a grateful-report.docx and grateful-refs.bib file. Use the grateful-report.docx contents to update the changelog.
+  out.dir = ".",
+  pkgs = "Session",
+  omit = NULL,
+  skip.missing = FALSE,
+  cite.tidyverse  = TRUE,
+)
+
+```
